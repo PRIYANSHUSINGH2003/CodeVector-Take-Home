@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Product Browser</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; color: #0f172a; }
+  header { background: #0f172a; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { color: #fff; font-size: 1.2rem; font-weight: 700; }
+  header span { color: #94a3b8; font-size: 0.8rem; }
+  .toolbar { display: flex; gap: 0.75rem; align-items: center; padding: 1rem 2rem; background: #fff; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+  select, button { padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.875rem; cursor: pointer; }
+  select { background: #fff; min-width: 160px; }
+  button { background: #6366f1; color: #fff; border-color: #6366f1; font-weight: 600; }
+  button:hover { background: #4f46e5; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary { background: #fff; color: #475569; border-color: #e2e8f0; }
+  .count-bar { padding: 0.6rem 2rem; font-size: 0.8rem; color: #64748b; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: #f8fafc; padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e2e8f0; }
+  tbody tr { border-bottom: 1px solid #f1f5f9; transition: background 0.1s; }
+  tbody tr:hover { background: #f8fafc; }
+  td { padding: 0.875rem 1rem; font-size: 0.875rem; }
+  .cat-badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; background: #eef2ff; color: #6366f1; }
+  .price { font-weight: 700; color: #0f172a; }
+  .id-cell { color: #94a3b8; font-size: 0.75rem; font-family: monospace; }
+  .date-cell { color: #64748b; font-size: 0.75rem; }
+  .pagination { display: flex; align-items: center; gap: 1rem; padding: 1rem 2rem; }
+  .loading { text-align: center; padding: 3rem; color: #94a3b8; }
+  .error-bar { background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c; padding: 0.75rem 2rem; font-size: 0.875rem; }
+  .table-wrap { overflow-x: auto; }
+  .api-url { font-size: 0.7rem; color: #94a3b8; padding: 0.4rem 2rem; background: #f1f5f9; font-family: monospace; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📦 Product Browser</h1>
+  <span id="total-count">Loading...</span>
+</header>
+
+<div class="toolbar">
+  <select id="cat-select">
+    <option value="">All Categories</option>
+  </select>
+  <button id="apply-btn">Apply Filter</button>
+  <button class="secondary" id="reset-btn">Reset</button>
+  <span style="margin-left:auto; font-size:0.75rem; color:#94a3b8;">Page size:
+    <select id="limit-select" style="min-width:70px;">
+      <option value="20">20</option>
+      <option value="50">50</option>
+      <option value="100">100</option>
+    </select>
+  </span>
+</div>
+
+<div id="error-bar" class="error-bar" style="display:none;"></div>
+<div id="count-bar" class="count-bar"></div>
+<div id="api-url" class="api-url"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Name</th><th>Category</th><th>Price</th><th>Created</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div id="loading" class="loading">Loading products...</div>
+
+<div class="pagination">
+  <button id="prev-btn" class="secondary" disabled>← Prev</button>
+  <span id="page-info" style="font-size:0.85rem; color:#64748b;"></span>
+  <button id="next-btn" disabled>Next →</button>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+// Change this to your deployed backend URL when hosted
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : '';  // Same origin when UI is served from backend
+
+// ── State ───────────────────────────────────────────────────────────────────
+let cursorStack = [];   // stack of cursors for back-navigation
+let currentCursor = null;
+let currentCategory = '';
+let currentLimit = 20;
+let pageNum = 1;
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const tbody     = document.getElementById('tbody');
+const loading   = document.getElementById('loading');
+const errorBar  = document.getElementById('error-bar');
+const countBar  = document.getElementById('count-bar');
+const apiUrlDiv = document.getElementById('api-url');
+const prevBtn   = document.getElementById('prev-btn');
+const nextBtn   = document.getElementById('next-btn');
+const pageInfo  = document.getElementById('page-info');
+const catSelect = document.getElementById('cat-select');
+const limitSel  = document.getElementById('limit-select');
+
+// ── Bootstrap ────────────────────────────────────────────────────────────────
+(async () => {
+  // Load categories
+  try {
+    const res  = await fetch(`${API}/categories`);
+    const data = await res.json();
+    data.categories.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      catSelect.appendChild(opt);
+    });
+  } catch(e) { showError('Cannot reach API at ' + API); }
+
+  // Load health / total count
+  try {
+    const res  = await fetch(`${API}/health`);
+    const data = await res.json();
+    document.getElementById('total-count').textContent =
+      `${Number(data.product_count).toLocaleString()} products`;
+  } catch(e) {}
+
+  fetchPage();
+})();
+
+// ── Fetch page ───────────────────────────────────────────────────────────────
+async function fetchPage() {
+  loading.style.display = 'block';
+  tbody.innerHTML = '';
+  errorBar.style.display = 'none';
+
+  const params = new URLSearchParams({ limit: currentLimit });
+  if (currentCategory) params.set('category', currentCategory);
+  if (currentCursor)   params.set('cursor',   currentCursor);
+
+  const url = `${API}/products?${params}`;
+  apiUrlDiv.textContent = '↗ ' + url;
+
+  try {
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    loading.style.display = 'none';
+
+    // Render rows
+    data.items.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="id-cell">#${p.id}</td>
+        <td>${escHtml(p.name)}</td>
+        <td><span class="cat-badge">${escHtml(p.category)}</span></td>
+        <td class="price">$${p.price.toFixed(2)}</td>
+        <td class="date-cell">${fmtDate(p.created_at)}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    countBar.textContent =
+      `Showing ${data.count} products — Page ${pageNum}` +
+      (currentCategory ? ` — Category: ${currentCategory}` : '');
+
+    // Pagination controls
+    prevBtn.disabled = pageNum <= 1;
+    nextBtn.disabled = !data.has_next;
+    if (data.has_next) nextBtn._nextCursor = data.next_cursor;
+    pageInfo.textContent = `Page ${pageNum}`;
+
+  } catch(e) {
+    loading.style.display = 'none';
+    showError('Fetch failed: ' + e.message);
+  }
+}
+
+// ── Event handlers ───────────────────────────────────────────────────────────
+document.getElementById('apply-btn').onclick = () => {
+  currentCategory = catSelect.value;
+  currentLimit    = parseInt(limitSel.value);
+  resetPagination();
+  fetchPage();
+};
+
+document.getElementById('reset-btn').onclick = () => {
+  catSelect.value = '';
+  currentCategory = '';
+  currentLimit    = 20;
+  limitSel.value  = '20';
+  resetPagination();
+  fetchPage();
+};
+
+nextBtn.onclick = () => {
+  cursorStack.push(currentCursor);
+  currentCursor = nextBtn._nextCursor;
+  pageNum++;
+  fetchPage();
+};
+
+prevBtn.onclick = () => {
+  currentCursor = cursorStack.pop() || null;
+  pageNum--;
+  fetchPage();
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function resetPagination() {
+  cursorStack   = [];
+  currentCursor = null;
+  pageNum       = 1;
+}
+
+function showError(msg) {
+  errorBar.textContent = '⚠️ ' + msg;
+  errorBar.style.display = 'block';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+}
+</script>
+</body>
+</html>
