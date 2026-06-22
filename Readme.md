@@ -1,7 +1,8 @@
 # Product Browser — CodeVector Take-Home
 
-Live URL: _add after deploy_
-GitHub: _your repo_
+Live URL: https://codevector-7bbx.onrender.com
+
+GitHub: [_your repo_](https://github.com/PRIYANSHUSINGH2003/CodeVector-Take-Home/tree/main)
 
 ---
 
